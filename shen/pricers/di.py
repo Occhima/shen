@@ -18,10 +18,10 @@ from typing import ClassVar
 
 import polars as pl
 
-from plib.contracts.instruments import Instrument
-from plib.contracts.market import Curve
-from plib.math import exp
-from plib.registry import Lookup, pricer
+from shen.contracts.instruments import Instrument
+from shen.contracts.market import Curve
+from shen.core.math import exp
+from shen.core.registry import Lookup, pricer
 
 NOTIONAL_PU = 100_000.0
 

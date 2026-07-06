@@ -19,7 +19,7 @@
 
     uvSync = ''
       if [ -f pyproject.toml ]; then
-        echo "Synchronizing Schenberg dependencies with uv..."
+        echo "Synchronizing shen dependencies with uv..."
         uv sync --all-groups
         export PATH="$PWD/.venv/bin:$PATH"
       fi
@@ -29,7 +29,7 @@
   in {
     devShells.default = pkgs.mkShell {
       inputsFrom = [config.treefmt.build.devShell];
-      name = "schenberg";
+      name = "shen";
       packages = commonPackages;
       shellHook = uvSync;
 

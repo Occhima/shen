@@ -8,17 +8,17 @@ The swap's unit value is "just a product of factors" per leg:
 priceable type in its own right. @price_legs(BulletSwap) owns only the
 structure: explode each swap row into two signed Bullet rows, reduce
 leg values back by sum (active - passive via the sign). Notional is
-absent by design: it is quantity, i.e. plib.positions' business.
+absent by design: it is quantity, i.e. shen.positions' business.
 """
 
 from __future__ import annotations
 
 import polars as pl
 
-from plib.contracts.instruments import BulletSwap, Instrument
-from plib.contracts.market import Curve, Fx, Spot
-from plib.math import exp
-from plib.registry import Lookup, price_legs, pricer
+from shen.contracts.instruments import BulletSwap, Instrument
+from shen.contracts.market import Curve, Fx, Spot
+from shen.core.math import exp
+from shen.core.registry import Lookup, price_legs, pricer
 
 
 class Bullet(Instrument):

@@ -23,10 +23,12 @@ from dataclasses import dataclass
 
 import polars as pl
 
-from plib.contracts.market import as_lazy
-from plib.engine import Market, price
-from plib.positions import Position, mtm as _mtm, pnl as _pnl
-from plib.registry import _snake
+from shen.contracts.market import as_lazy
+from shen.core.engine import Market, price
+from shen.core.registry import _snake
+from shen.positions import Position
+from shen.positions import mtm as _mtm
+from shen.positions import pnl as _pnl
 
 
 def consolidate(contract, trades: pl.LazyFrame,

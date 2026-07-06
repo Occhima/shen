@@ -7,7 +7,7 @@ the gates (Position.validate), exactly like market data.
 
 The relevant point about markings (marcação): mtm/pnl take
 LazyFrame[PriceVector] and do not care where the vector came from —
-plib.price() (model) or official desk/exchange marks. Both are just
+shen.price() (model) or official desk/exchange marks. Both are just
 PriceVector sources, so model-vs-mark comparison is one join: basis().
 """
 
@@ -18,7 +18,7 @@ import polars as pl
 from pandera import check_types
 from pandera.typing.polars import LazyFrame
 
-from plib.contracts.market import as_lazy
+from shen.contracts.market import as_lazy
 
 
 class Position(pa.DataFrameModel):

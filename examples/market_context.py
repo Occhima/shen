@@ -17,9 +17,8 @@ import datetime as dt
 
 import pandas as pd
 import polars as pl
-
-import plib.pricers  # noqa: F401
-from plib import Book, Curve, Fx, Market, Spot, price
+import shen.pricers  # noqa: F401
+from shen import Book, Curve, Fx, Market, Spot, price
 
 swap = pd.DataFrame({
     "instrument_id": ["SWP-1"], "instrument_type": ["bullet_swap"],

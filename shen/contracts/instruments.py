@@ -6,7 +6,7 @@ travel through explode(). Forward values are MARKET and arrive via
 Lookups. factor = fwd / base is therefore one line of calculator math.
 
 qty is deliberately ABSENT: pricers return unit value; quantity belongs
-to plib.positions.
+to shen.positions.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from typing import ClassVar
 import pandera.polars as pa
 import polars as pl
 
-from plib.contracts.market import as_lazy
+from shen.contracts.market import as_lazy
 
 
 class Instrument(pa.DataFrameModel):
@@ -52,7 +52,7 @@ class BulletSwap(Instrument):
     """One row = one swap: an active and a passive bullet leg.
 
     No notional here — pricers return UNIT value ("some product of
-    factors"); notional is a quantity and belongs to plib.positions.
+    factors"); notional is a quantity and belongs to shen.positions.
     Base factors (index_base, fx_base) are inception economics, per leg.
     Domestic legs use the identity pair (e.g. BRLBRL, rate 1.0) so the
     calculator stays total — no nullable branches.

@@ -14,12 +14,11 @@ import datetime as dt
 
 import pandas as pd
 import polars as pl
-
-import plib.pricers  # noqa: F401 — fills the registry the tree recovers from
-from plib import Book, Curve, Fx, Market, Position, Spot, mtm
-from plib.contracts.market import as_lazy
-from plib.pricers.di import DiFuture
-from plib.plugins import MarketContext, Tree, market
+import shen.pricers  # noqa: F401 — fills the registry the tree recovers from
+from shen import Book, Curve, Fx, Market, Position, Spot, mtm
+from shen.contracts.market import as_lazy
+from shen.core import MarketContext, Tree, market
+from shen.pricers.di import DiFuture
 
 REF = dt.date(2026, 7, 3)
 

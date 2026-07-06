@@ -1,6 +1,6 @@
-"""DV01 pipeline for a DI1 futures book — pure user-land plib.
+"""DV01 pipeline for a DI1 futures book — pure user-land shen.
 
-Everything below is written as if `pip install plib[tree]` just ran:
+Everything below is written as if `pip install shen[tree]` just ran:
 only public API. The pipeline is a Tree; the market is an ambient
 context; the outputs are (1) per-contract and book DV01 in BRL and
 (2) a key-rate DV01 ladder per pillar, built from nothing but the
@@ -11,11 +11,10 @@ import datetime as dt
 
 import pandas as pd
 import polars as pl
-
-import plib.pricers  # noqa: F401 — registers di_future
-from plib import Book, Curve, dv01, unresolved
-from plib.pricers.di import DiFuture
-from plib.plugins import MarketContext, Tree, market
+import shen.pricers  # noqa: F401 — registers di_future
+from shen import Book, Curve, dv01, unresolved
+from shen.core import MarketContext, Tree, market
+from shen.pricers.di import DiFuture
 
 REF = dt.date(2026, 7, 3)
 BPS = 1.0
@@ -84,7 +83,7 @@ def krd_ladder(book) -> pl.LazyFrame:
                 .otherwise(pl.col("log_df"))
                 .alias("log_df"),
     )
-    from plib import price
+    from shen import price
     wide = (price(book.trades, shocked).collect()
             .pivot("scenario_id", index="instrument_id", values="value"))
     krd_cols = [c for c in wide.columns if c.startswith("krd:")]

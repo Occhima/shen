@@ -38,8 +38,8 @@ from dataclasses import dataclass
 
 import networkx as nx
 
-from plib.plugins.context import MarketContext, market
-from plib.registry import REGISTRY, Pricer, as_pricer
+from shen.core.engine import MarketContext, market
+from shen.core.registry import REGISTRY, Pricer, as_pricer
 
 
 def _recover(pricer) -> Pricer:

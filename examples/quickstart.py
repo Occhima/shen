@@ -1,12 +1,11 @@
-"""plib quickstart — data from various places, one lazy pipeline out."""
+"""shen quickstart — data from various places, one lazy pipeline out."""
 
 import datetime as dt
 
 import pandas as pd
 import polars as pl
-
-import plib.pricers  # noqa: F401 — registers commodity_forward + bullet_swap
-from plib import Curve, Fx, Market, Position, Spot, dv01, mtm, price, sensitivities
+import shen.pricers  # noqa: F401 — registers commodity_forward + bullet_swap
+from shen import Curve, Fx, Market, Position, Spot, dv01, mtm, price, sensitivities
 
 REF = dt.date(2026, 7, 3)
 

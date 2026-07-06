@@ -1,17 +1,17 @@
 """Greeks by autodiff — one calculator body, three backends.
 
 The DSL contract pays out here: vanilla_option is a pure function whose
-math routes through plib.math (structural dispatch). So:
+math routes through shen.core.math (structural dispatch). So:
 
     polars   — price the book lazily (Exprs have .exp/.log methods)
     floats   — unit-test the same body
-    jax      — plib.math.use(jnp) makes exp/log/sqrt/norm_cdf fall back
+    jax      — shen.core.math.use(jnp) makes exp/log/sqrt/norm_cdf fall back
                to jax.numpy, and jax.grad/vmap give EXACT greeks of the
                exact pricing function. No second implementation, no
                bump-and-reprice error, nothing to keep in sync.
 
 The reconciliation at the end is the point: jax's autodiff delta agrees
-with plib.sensitivities' expression-space finite difference — two
+with shen.sensitivities' expression-space finite difference — two
 independent mechanisms differentiating the SAME function.
 """
 
@@ -20,11 +20,10 @@ import datetime as dt
 import jax
 import jax.numpy as jnp
 import pandas as pd
-
-import plib.math as pmath
-import plib.pricers  # noqa: F401
-from plib import Market, price, sensitivities
-from plib.pricers.vanilla import vanilla_option
+import shen.core.math as pmath
+import shen.pricers  # noqa: F401
+from shen import Market, price, sensitivities
+from shen.pricers.vanilla import vanilla_option
 
 jax.config.update("jax_enable_x64", True)   # match polars f64
 pmath.use(jnp)                              # DSL: jax joins the backends
@@ -86,7 +85,7 @@ greeks = tr.select("instrument_id", "value").with_columns(
     pl.Series("theta", np.asarray(theta)))
 print(greeks)
 
-# 3. reconciliation: autodiff vs plib's expression-space FD (h=1e-4)
+# 3. reconciliation: autodiff vs shen's expression-space FD (h=1e-4)
 fd = sensitivities(book, mkt, h=1e-4).collect()
 fd_spot = (fd.filter(fd["factor"] == "spot")
              .sort("instrument_id")["dv"].to_numpy())

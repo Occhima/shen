@@ -3,9 +3,8 @@
 import datetime as dt
 
 import pandas as pd
-
-import plib.pricers  # noqa: F401
-from plib import Curve, Market, Position, dv01, mtm, price, unresolved
+import shen.pricers  # noqa: F401
+from shen import Curve, Market, Position, dv01, mtm, price, unresolved
 
 REF = dt.date(2026, 7, 3)
 

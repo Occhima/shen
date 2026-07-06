@@ -9,11 +9,9 @@ import datetime as dt
 
 import pandas as pd
 import polars as pl
-
-import plib.pricers  # noqa: F401
-from plib import (Book, Curve, Fx, Market, Spot, dv01, sensitivities,
-                  unpriced, unresolved)
-from plib.pricers.di import DiFuture
+import shen.pricers  # noqa: F401
+from shen import Book, Curve, Fx, Market, Spot, dv01, sensitivities, unpriced, unresolved
+from shen.pricers.di import DiFuture
 
 REF = dt.date(2026, 7, 3)
 

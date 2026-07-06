@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from plib.contracts.instruments import CommodityForward
-from plib.contracts.market import Curve, Fx, Spot
-from plib.math import exp
-from plib.registry import Lookup, pricer
+from shen.contracts.instruments import CommodityForward
+from shen.contracts.market import Curve, Fx, Spot
+from shen.core.math import exp
+from shen.core.registry import Lookup, pricer
 
 
 @pricer(

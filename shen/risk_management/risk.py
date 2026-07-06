@@ -17,9 +17,9 @@ from __future__ import annotations
 
 import polars as pl
 
-from plib.contracts.market import Curve, MarketObject
-from plib.engine import ID_COLS, Market, _resolve, _resolved, price
-from plib.registry import MEASURE
+from shen.contracts.market import Curve, MarketObject
+from shen.core.engine import ID_COLS, Market, _resolve, _resolved, price
+from shen.core.registry import MEASURE
 
 
 def sensitivities(instruments, mkt: Market | None = None, h: float = 1e-4,

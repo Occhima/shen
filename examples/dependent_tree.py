@@ -20,12 +20,11 @@ import datetime as dt
 
 import pandas as pd
 import polars as pl
-
-import plib.pricers  # noqa: F401
-from plib import Fx, MarketContext, Spot, unresolved
-from plib.pricers.di import di_future
-from plib.pricers.swap import bullet_swap
-from plib.plugins import Tree, market
+import shen.pricers  # noqa: F401
+from shen import Fx, MarketContext, Spot, unresolved
+from shen.core import Tree, market
+from shen.pricers.di import di_future
+from shen.pricers.swap import bullet_swap
 
 REF = dt.date(2026, 7, 3)
 g = Tree("dependent")
