@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.ty/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Packaging / virtualenvs
+.venv/
+build/
+dist/
+*.egg-info/
+
+# Local environment
+.env
+.env.*
+!.envrc
+.direnv/
+
+# Docs build output
+site/
+docs/examples/_book/
+
+# Quarto intermediate files
+docs/examples/.quarto/
+docs/examples/**/*.quarto_ipynb
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
+
+# marimo generated session/layout caches
+__marimo__/

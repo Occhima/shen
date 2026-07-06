@@ -1,0 +1,18 @@
+---
+title: "Schenberg Risk Toolkit"
+subtitle: "A worked-example collection for the Schenberg pricing and risk framework"
+---
+
+Each chapter is a self-contained notebook that builds on the last — from a minimal
+forward pricer to a full equity book with stressed scenarios.
+
+| Chapter | Topic |
+|---------|-------|
+| 1 | Forward pricer — formula graph from scratch |
+| 2 | Vanilla option — Black-Scholes pricer |
+| 3 | Autodiff Greeks — JAX-powered sensitivities |
+| 4 | Scenario VaR — Monte Carlo in one lazy plan |
+| 5 | QuantLib benchmark — parity check against QL |
+| 6 | Equity book — Router, PositionView, Fold, stress |
+
+All code runs on **Polars lazy frames**; nothing is collected until the final call.

@@ -1,0 +1,181 @@
+---
+title: "Forward pricer — a formula graph from scratch"
+subtitle: "Headless formula parameters, semantic market roles, one lazy Polars plan"
+---
+
+Schenberg is a **lazy pricing DSL**. A pricer is a small *symbolic* program — a
+`Formula[ForwardInput, ForwardOutput]` of named terms — and the same program compiles three ways from one
+declaration:
+
+- to a lazy **Polars** expression (what runs),
+- to **LaTeX** derived from the formula itself (what you read), and
+- to a **Mermaid** dependency graph (what you reason about).
+
+Market data never enters the graph. It is resolved into ordinary input columns by
+`bind(...)` *before* the graph runs, so the graph stays a pure function of its
+input frame.
+
+```{python}
+#| code-fold: true
+#| code-summary: "Imports & display helpers"
+from datetime import date
+
+import polars as pl
+
+from schenberg import (
+    Formula, MarketSnapshot, With, bind, exp, market_role,
+)
+from schenberg.domain.base import SchenbergDataFrameModel
+from schenberg_quarto import show_formulas, show_graph, show_explain
+```
+
+## 1. Declare market data as *roles*, outside the graph
+
+A `market_role` says *where* a column comes from and *how* to join it — never how
+to price. Here a forward rate and a risk-free rate are read from a `curves`
+source, keyed by indexer and tenor.
+
+```{python}
+ForwardRate = (
+    market_role("forward_rate")
+    .read("curves", "forward_rate")
+    .by(indexer="id_indexador", payment_days="tenor_days")
+)
+RiskFreeRate = (
+    market_role("risk_free_rate")
+    .read("curves", "risk_free_rate")
+    .by(indexer="id_indexador", payment_days="tenor_days")
+)
+
+
+class ForwardInput(With[ForwardRate], With[RiskFreeRate], SchenbergDataFrameModel):
+    instrument_id: str
+    indexer: str
+    currency: str
+    strike: float
+    payment_days: int
+
+
+class ForwardOutput(SchenbergDataFrameModel):
+    instrument_id: str
+    future_value: float
+    present_value: float
+    value: float
+    delta: float
+    currency: str
+```
+
+## 2. Write the math as headless formulas
+
+Each formula parameter is a **headless dependency**: a bare name resolved to a
+prior term or an input column. The function body reads like the math — no
+`c.`/`contract.` indirection.
+
+```{python}
+g = Formula[ForwardInput, ForwardOutput]("forward")
+
+
+@g.formula(symbol="T", description="business-day year fraction")
+def year_fraction(payment_days):
+    return payment_days / 252.0
+
+
+@g.formula(symbol="DF", description="discount factor")
+def discount_factor(risk_free_rate, year_fraction):
+    return exp(-risk_free_rate * year_fraction)
+
+
+@g.formula(symbol="FV", description="forward minus strike")
+def future_value(forward_rate, strike):
+    return forward_rate - strike
+
+
+@g.formula(symbol="PV", description="present value")
+def present_value(future_value, discount_factor):
+    return future_value * discount_factor
+
+
+@g.formula(symbol="\\Delta")
+def delta(discount_factor):
+    return discount_factor
+
+
+g.returns(
+    "output",
+    ForwardOutput,
+    instrument_id="instrument_id",
+    future_value="future_value",
+    present_value="present_value",
+    value="present_value",
+    delta="delta",
+    currency="currency",
+)
+```
+
+## 3. The graph renders itself
+
+Because terms are symbolic, the LaTeX below is *derived from the IR* — it can
+never drift from what executes.
+
+```{python}
+#| output: asis
+show_formulas(g)
+```
+
+And the typed dependency DAG, straight from `graph.to_mermaid()` as `Formula[ForwardInput, ForwardOutput]`:
+
+```{python}
+#| output: asis
+show_graph(g)
+```
+
+```{python}
+#| output: asis
+show_explain(g, view="output")
+```
+
+## 4. Bind market data, then plan lazily
+
+```{python}
+trades = pl.DataFrame(
+    {
+        "instrument_id": ["FWD-1", "FWD-2"],
+        "indexer": ["DI", "DI"],
+        "currency": ["BRL", "BRL"],
+        "strike": [100.0, 105.0],
+        "payment_days": [252, 504],
+    }
+).lazy()
+
+market = (
+    MarketSnapshot.at(date(2026, 6, 6))
+    .source(
+        "curves",
+        pl.DataFrame(
+            {
+                "id_indexador": ["DI", "DI"],
+                "tenor_days": [252, 504],
+                "forward_rate": [112.0, 118.0],
+                "risk_free_rate": [0.10, 0.11],
+            }
+        ),
+        unique_by=("id_indexador", "tenor_days"),
+    )
+    .build()
+)
+
+plan = g.plan(bind(trades, market, ForwardInput), view="output")
+type(plan).__name__  # still lazy — nothing has been collected
+```
+
+`bind` resolved the two market roles into `forward_rate` / `risk_free_rate`
+columns; `plan` returned a `LazyFrame`. We collect only at the very end:
+
+```{python}
+plan.collect()
+```
+
+The whole pricer is one `with_columns` over a `LazyFrame`: no Python loops, no
+row-wise UDFs, no `.collect()` hidden inside the graph. The next notebooks build
+Black-Scholes Greeks, autodiff vanna/volga, scenario VaR, and a QuantLib
+benchmark on this same spine.
