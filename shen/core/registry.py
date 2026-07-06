@@ -2,7 +2,7 @@
 
 The registry is an INDEX, not a router. Decorating a calculator makes
 the function itself a self-contained pricer — fn.price(trades, mkt)
-prices with that one function; plib.engine.price(...) is merely a
+prices with that one function; shen.core.engine.price(...) is merely a
 book-level combinator over an explicit iterable of pricers. REGISTRY
 exists so you can *recover* pricers by name for dynamic use cases
 (REGISTRY["bullet_swap"]), never so a central dispatcher can find them
@@ -30,7 +30,7 @@ from typing import Literal
 import pandera.polars as pa
 import polars as pl
 
-from plib.contracts.market import MarketObject
+from shen.contracts.market import MarketObject, _snake
 
 type Calculator = Callable[..., pl.Expr]
 type Frames = Mapping[type[MarketObject], pl.LazyFrame]
@@ -120,12 +120,12 @@ class Pricer:
     # -- self-contained usage: no central dispatch required -----------
     def price(self, instruments, mkt=None, *, trace: bool = False,
               strict: bool = True) -> pl.LazyFrame:
-        from plib.engine import price as _price
+        from shen.core.engine import price as _price
         return _price(instruments, mkt, pricers=(self,),
                       trace=trace, strict=strict)
 
     def unresolved(self, instruments, mkt=None) -> pl.LazyFrame:
-        from plib.engine import unresolved as _u
+        from shen.core.engine import unresolved as _u
         return _u(instruments, mkt, pricers=(self,))
 
 
@@ -267,7 +267,3 @@ def price_legs(schema: type[pa.DataFrameModel], leg, *,
         return _register(_auto_explode(schema, lp.schema, coefs), attach_to=fn)
 
     return deco
-
-
-def _snake(name: str) -> str:
-    return "".join(f"_{c.lower()}" if c.isupper() else c for c in name).lstrip("_")

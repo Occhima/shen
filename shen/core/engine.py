@@ -22,8 +22,8 @@ from dataclasses import dataclass, field, replace
 
 import polars as pl
 
-from plib.contracts.market import MARKET_TYPES, MarketObject, as_lazy
-from plib.registry import MEASURE, REGISTRY, Pricer, as_pricer, resolve
+from shen.contracts.market import MARKET_TYPES, MarketObject, as_lazy
+from shen.core.registry import MEASURE, REGISTRY, Pricer, as_pricer, resolve
 
 ID_COLS = ("instrument_id", "instrument_type")
 
@@ -44,6 +44,11 @@ class Market:
         init-able like a dataclass, open like a registry. Mapping /
         pairs / kwargs all normalize to the same shape; each contract's
         validate() is the gate.
+
+        Conventions (contracts with _canonical set) are routed through
+        _to_canonical and merged into their canonical contract's frame
+        before validation — so `di_curve=df` (rate+anchor) and
+        `curve=df` (log_df) land in the same Curve frame.
         """
         if len(data) == 1 and not isinstance(data[0], tuple):
             entries = dict(data[0])        # Mapping, or iterable of pairs
@@ -57,7 +62,22 @@ class Market:
             if contract in entries:
                 raise TypeError(f"{contract.__name__} given twice")
             entries[contract] = raw
-        return cls({c: c.validate(raw) for c, raw in entries.items()}, ref_date)
+        groups: dict[type[MarketObject], list[pl.LazyFrame]] = {}
+        for contract, raw in entries.items():
+            target = contract._canonical
+            lf = contract._to_canonical(as_lazy(raw)) if target is not None else as_lazy(raw)
+            groups.setdefault(target or contract, []).append(lf)
+        return cls(
+            {c: c.validate(cls._merge_rows(lfs)) for c, lfs in groups.items()},
+            ref_date)
+
+    @staticmethod
+    def _merge_rows(lfs: list[pl.LazyFrame]) -> pl.LazyFrame:
+        """Concat rows for the same canonical contract. diagonal_relaxed
+        unions columns (filling nulls) so convention sources (log_df)
+        and direct loads (discount_factor) merge before _parse derives
+        the missing per-row values inside validate."""
+        return lfs[0] if len(lfs) == 1 else pl.concat(lfs, how="diagonal_relaxed")
 
     def __getitem__(self, contract: type[MarketObject]) -> pl.LazyFrame:
         return self.frames[contract]
@@ -94,7 +114,7 @@ class Market:
         return Market({**self.frames, contract: shocked}, self.ref_date)
 
 
-_AMBIENT: ContextVar["Market | None"] = ContextVar("plib_market", default=None)
+_AMBIENT: ContextVar["Market | None"] = ContextVar("shen_market", default=None)
 
 
 def market() -> "Market":

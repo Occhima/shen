@@ -6,7 +6,7 @@ The pieces, each in its native slot:
     sigma = atm + skew*k + curv*k^2, k = ln(K/F).
   * tau — dates are frame algebra, so `derive` computes bus/252 year
     fraction declaratively; the calculator receives it as a number.
-  * the calculator — pure plib.math DSL (exp, log, sqrt, norm_cdf), so
+  * the calculator — pure shen.core.math DSL (exp, log, sqrt, norm_cdf), so
     the IDENTICAL body prices lazily under polars and differentiates
     under jax for exact greeks (see examples/option_greeks_jax.py).
   * butterfly — a combinator: the body `low - 2*mid + high` IS the
@@ -19,10 +19,10 @@ from __future__ import annotations
 
 import polars as pl
 
-from plib.contracts.instruments import Instrument
-from plib.contracts.market import Curve, Spot, VolSurface
-from plib.math import exp, log, norm_cdf, sqrt
-from plib.registry import Lookup, price_legs, pricer
+from shen.contracts.instruments import Instrument
+from shen.contracts.market import Curve, Spot, VolSurface
+from shen.core.math import exp, log, norm_cdf, sqrt, where
+from shen.core.registry import Lookup, price_legs, pricer
 
 
 class VanillaOption(Instrument):
@@ -66,8 +66,10 @@ def vanilla_option(cp, strike, tau, spot, log_df_exp, atm, skew, curv):
     v = sigma * sqrt(tau)
     d1 = -k / v + 0.5 * v
     d2 = d1 - v
-    return exp(log_df_exp) * cp * (
-        f * norm_cdf(cp * d1) - strike * norm_cdf(cp * d2))
+    df = exp(log_df_exp)
+    call = df * (f * norm_cdf(d1) - strike * norm_cdf(d2))
+    put = df * (strike * norm_cdf(-d2) - f * norm_cdf(-d1))
+    return where(cp > 0, call, put)
 
 
 @price_legs(Butterfly, vanilla_option)

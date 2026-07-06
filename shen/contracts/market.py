@@ -15,8 +15,10 @@ which *instrument* columns map onto that geometry.
 
 from __future__ import annotations
 
+import re
 from typing import ClassVar
 
+import pandera.pandas  # noqa: F401 — registers builtin checks (gt/unique/...) into the polars backend's CHECK_FUNCTION_REGISTRY; without this, pandera.polars.Field(gt=0) raises KeyError at class definition.
 import pandera.polars as pa
 import polars as pl
 
@@ -33,7 +35,10 @@ def as_lazy(frame) -> pl.LazyFrame:
 
 
 def _snake(name: str) -> str:
-    return "".join("_" + c.lower() if c.isupper() else c for c in name).lstrip("_")
+    """Acronym-aware: DICurve -> di_curve, VolSurface -> vol_surface.
+    Boundaries: lower/digit->Upper, and Upper->Upper+lower."""
+    return re.sub(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])",
+                  "_", name).lower()
 
 
 MARKET_TYPES: dict[str, type["MarketObject"]] = {}
@@ -46,6 +51,12 @@ the open-world version of a dataclass field."""
 class MarketObject(pa.DataFrameModel):
     _key: ClassVar[str]  # entity column, e.g. curve_id
     _at: ClassVar[str]   # time column joined against instrument dates
+    _canonical: ClassVar[type["MarketObject"] | None] = None
+    """Convention -> canonical contract. None = self is canonical (the
+    normal case). A convention (e.g. DICurve) sets this to its target
+    (e.g. Curve) so Market.load routes its rows through _to_canonical
+    and merges into the canonical contract's frame — the convention
+    exists only as an ingestion shape, never as a stored frame."""
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -64,6 +75,13 @@ class MarketObject(pa.DataFrameModel):
     def _parse(cls, lf: pl.LazyFrame) -> pl.LazyFrame:
         """Derive fields, dedup, sort. Identity by default."""
         return lf.unique(subset=[cls._key, cls._at], keep="last").sort(cls._key, cls._at)
+
+    @classmethod
+    def _to_canonical(cls, lf: pl.LazyFrame) -> pl.LazyFrame:
+        """Convention form -> canonical form. Identity by default;
+        conventions override to do their specific derivation
+        (rate -> log_df, etc.). Only called when _canonical is set."""
+        return lf
 
     @classmethod
     def validate(cls, frame, *args, **kwargs) -> pl.LazyFrame:  # type: ignore[override]
@@ -101,8 +119,18 @@ class Curve(MarketObject):
     @classmethod
     def _parse(cls, lf: pl.LazyFrame) -> pl.LazyFrame:
         names = set(lf.collect_schema().names())
-        if "log_df" not in names:
-            if "discount_factor" in names:
+        has_log = "log_df" in names
+        has_df = "discount_factor" in names
+        if has_log and has_df:
+            lf = lf.with_columns(
+                log_df=pl.when(pl.col("log_df").is_null())
+                         .then(pl.col("discount_factor").log())
+                         .otherwise(pl.col("log_df")),
+                discount_factor=pl.when(pl.col("discount_factor").is_null())
+                                  .then(pl.col("log_df").exp())
+                                  .otherwise(pl.col("discount_factor")))
+        elif not has_log:
+            if has_df:
                 lf = lf.with_columns(log_df=pl.col("discount_factor").log())
             elif {"rate", "anchor_date"} <= names:
                 du = pl.business_day_count(
@@ -113,7 +141,8 @@ class Curve(MarketObject):
             else:
                 raise ValueError(
                     "Curve needs log_df, discount_factor, or (rate, anchor_date)")
-        if "discount_factor" not in names:
+            lf = lf.with_columns(discount_factor=pl.col("log_df").exp())
+        elif not has_df:
             lf = lf.with_columns(discount_factor=pl.col("log_df").exp())
         return super()._parse(lf)
 

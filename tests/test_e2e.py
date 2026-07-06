@@ -6,11 +6,10 @@ import math
 import pandas as pd
 import polars as pl
 import pytest
-
-import plib.pricers  # noqa: F401 — registers commodity + swap
-from plib import Market, Curve, Fx, Position, Spot, mtm, pnl, price, sensitivities
-from plib.pricers.commodity import commodity_forward
-from plib.pricers.swap import bullet
+import shen.pricers  # noqa: F401 — registers commodity + swap
+from shen import Curve, Fx, Market, Position, Spot, mtm, pnl, price, sensitivities
+from shen.pricers.commodity import commodity_forward
+from shen.pricers.swap import bullet
 
 REF = dt.date(2026, 7, 3)
 
@@ -134,9 +133,9 @@ def test_pnl_typed(mkt):
 
 
 def test_review_fixes(mkt):
-    from plib import unresolved
-    from plib.registry import Lookup, pricer
-    from plib.contracts.instruments import Instrument
+    from shen import unresolved
+    from shen.contracts.instruments import Instrument
+    from shen.core.registry import Lookup, pricer
 
     # 1. missing fixing: reported by unresolved(), NaN (not null) in price
     bad = _fwd_trades().assign(index="WTI")
@@ -154,7 +153,7 @@ def test_review_fixes(mkt):
     # 3. alias shadowing a contract column fails at import time
     import polars as _pl
     import pytest as _pytest
-    from plib.contracts.market import Curve as _Curve
+    from shen.contracts.market import Curve as _Curve
     with _pytest.raises(TypeError, match="shadow"):
         class X(Instrument):
             strike: float
@@ -185,9 +184,10 @@ def test_di_futures_book(mkt):
 
 def test_decentralized_pricing(mkt):
     """No central dispatch: the function IS the pricer."""
-    from plib import price as book_price, unpriced
-    from plib.pricers.commodity import commodity_forward
-    from plib.pricers.swap import bullet_swap
+    from shen import price as book_price
+    from shen import unpriced
+    from shen.pricers.commodity import commodity_forward
+    from shen.pricers.swap import bullet_swap
 
     trades = _fwd_trades()
     a = commodity_forward.price(trades, mkt).collect()          # fn-level
@@ -199,7 +199,7 @@ def test_decentralized_pricing(mkt):
     assert left["instrument_id"].to_list() == ["t1"]
 
     # registry as an index (recovery, not routing)
-    from plib.registry import REGISTRY
+    from shen.core.registry import REGISTRY
     assert REGISTRY["commodity_forward"] is commodity_forward.pricer
 
 
@@ -221,8 +221,8 @@ def test_curve_from_rate_convention(mkt):
 def test_fungibilidade_preserves_mtm(mkt):
     """sum(q_i*(V-K_i)) == (sum q)*(V-Kbar) — the invariant that makes
     notional-weighted averaging the RIGHT merge."""
-    from plib import Book
-    from plib.pricers.di import DiFuture
+    from shen import Book
+    from shen.pricers.di import DiFuture
 
     trades = pd.DataFrame({
         "instrument_id":   ["lotA", "lotB", "lotC", "t1"],
@@ -261,9 +261,9 @@ def test_fungibilidade_preserves_mtm(mkt):
 
 
 def test_fungibilidade_closed_position_vanishes(mkt):
-    from plib.book import consolidate as consolidate_fn
-    from plib.pricers.di import DiFuture
-    from plib import Position
+    from shen import Position
+    from shen.positions.book import consolidate as consolidate_fn
+    from shen.pricers.di import DiFuture
 
     trades = pd.DataFrame({
         "instrument_id": ["a", "b"], "instrument_type": ["di_future"] * 2,
@@ -278,7 +278,7 @@ def test_fungibilidade_closed_position_vanishes(mkt):
 
 def test_tree_plugin_and_context(mkt):
     import polars as _pl
-    from plib.plugins import MarketContext, Tree, market
+    from shen.core import MarketContext, Tree, market
 
     g = Tree("t")
 
@@ -315,9 +315,9 @@ def test_tree_plugin_and_context(mkt):
 
 def test_ambient_market_is_used_by_core(mkt):
     """price/dv01/Pricer.price/Book.mtm all resolve the ambient context."""
-    from plib import Book, MarketContext, dv01
-    from plib.pricers.commodity import commodity_forward
     import pytest as _pytest
+    from shen import Book, MarketContext, dv01
+    from shen.pricers.commodity import commodity_forward
 
     trades = _fwd_trades()
     explicit = price(trades, mkt).collect()["value"][0]
@@ -348,9 +348,10 @@ def test_market_load_shapes():
 def test_market_named_kwargs_and_registration():
     """Contracts register their name at definition: init like a
     dataclass, open like a registry."""
-    import pytest as _pytest
-    from plib.contracts.market import MARKET_TYPES, MarketObject
     from typing import ClassVar
+
+    import pytest as _pytest
+    from shen.contracts.market import MARKET_TYPES, MarketObject
 
     df = pd.DataFrame({"curve_id": ["X"], "pillar_date": [dt.date(2027, 1, 4)],
                        "discount_factor": [0.95]})
@@ -373,7 +374,7 @@ def test_market_named_kwargs_and_registration():
         {"name": ["fra-cupom"], "date": [REF], "value": [0.001]}))
     assert Basis in m.frames
 
-    from plib import MarketContext
+    from shen import MarketContext
     with MarketContext(REF, curve=df) as mkt:      # kwargs on the context too
         assert Curve in mkt.frames and mkt.ref_date == REF
 
@@ -398,9 +399,9 @@ def test_dependent_instruments_via_with_data(mkt):
 
 def test_structure_combinator():
     import pytest as _pytest
-    from plib.registry import REGISTRY, price_legs
-    from plib.contracts.instruments import BulletSwap
-    from plib.pricers.swap import bullet, bullet_swap
+    from shen.contracts.instruments import BulletSwap
+    from shen.core.registry import REGISTRY, price_legs
+    from shen.pricers.swap import bullet, bullet_swap
 
     assert bullet_swap(active=2.0, passive=0.5) == 1.5   # plain function
 
@@ -442,8 +443,8 @@ def _opt_mkt():
 
 def test_vanilla_option_matches_hand_black():
     import numpy as np
-    from plib.math import norm_cdf
-    from plib.pricers.vanilla import vanilla_option
+    from shen.core.math import norm_cdf
+    from shen.pricers.vanilla import vanilla_option
 
     mkt = _opt_mkt()
     trades = pd.DataFrame({
@@ -483,3 +484,102 @@ def test_butterfly_is_the_declared_combination():
     v = price(legs, mkt).collect().sort("instrument_id")["value"].to_list()
     assert abs(v_fly - (v[0] - 2 * v[1] + v[2])) < 1e-9
     assert v_fly > 0                            # long fly has positive value
+
+
+def test_convention_contract_di_curve():
+    """DICurve convention routes through _to_canonical into Curve's frame."""
+    import numpy as np
+    from shen import DICurve
+
+    anchor, pillar, rate = dt.date(2026, 7, 1), dt.date(2027, 7, 1), 0.11
+    mkt = Market.load(
+        di_curve=pd.DataFrame({
+            "curve_id": ["DI"], "pillar_date": [pillar],
+            "rate": [rate], "anchor_date": [anchor],
+        }),
+        ref_date=REF)
+
+    assert Curve in mkt.frames
+    assert DICurve not in mkt.frames
+
+    c = mkt[Curve].collect()
+    du = int(np.busday_count(anchor, pillar))
+    expected = -(du / 252) * math.log1p(rate)
+    assert abs(c["log_df"][0] - expected) < 1e-12
+
+    # convention + direct load merge into the same Curve frame
+    mkt2 = Market.load(
+        di_curve=pd.DataFrame({
+            "curve_id": ["DI"], "pillar_date": [pillar],
+            "rate": [rate], "anchor_date": [anchor],
+        }),
+        curve=pd.DataFrame({
+            "curve_id": ["USD", "USD"],
+            "pillar_date": [dt.date(2026, 7, 1), dt.date(2027, 7, 1)],
+            "discount_factor": [1.0, 0.96],
+        }),
+        ref_date=REF)
+    c2 = mkt2[Curve].collect().sort("curve_id", "pillar_date")
+    assert set(c2["curve_id"]) == {"DI", "USD"}
+
+
+def test_routed_call_put_parity():
+    """C - P = df*(F - K) under the where()-routed calculator."""
+    from shen.pricers.vanilla import vanilla_option
+
+    mkt = _opt_mkt()
+    K = 100.0
+    common = dict(strike=K, expiry=dt.date(2027, 7, 1),
+                  index="BRENT", disc_curve="USD", surface="BRENT-VOL")
+    call = pd.DataFrame({"instrument_id": ["C"], "instrument_type": ["vanilla_option"],
+                         "cp": [1.0], **common})
+    put = pd.DataFrame({"instrument_id": ["P"], "instrument_type": ["vanilla_option"],
+                        "cp": [-1.0], **common})
+    vc = price(call, mkt).collect()["value"][0]
+    vp = price(put, mkt).collect()["value"][0]
+    parity = 0.96 * (100.0 / 0.96 - K)
+    assert abs((vc - vp) - parity) < 1e-6
+
+    # float path: where(bool, ...) selects the right branch
+    ldf = math.log(0.96)
+    vc_f = vanilla_option(cp=1.0, strike=K, tau=1.0, spot=100.0,
+                          log_df_exp=ldf, atm=0.25, skew=0.0, curv=0.0)
+    vp_f = vanilla_option(cp=-1.0, strike=K, tau=1.0, spot=100.0,
+                          log_df_exp=ldf, atm=0.25, skew=0.0, curv=0.0)
+    assert abs((vc_f - vp_f) - parity) < 1e-6
+
+
+def test_snake_names_stable_and_acronym_aware():
+    from shen.contracts.market import _snake
+    for cls_name, expected in [
+        ("DICurve", "di_curve"), ("DiFuture", "di_future"),
+        ("VolSurface", "vol_surface"), ("BulletSwap", "bullet_swap"),
+        ("WdoFuture", "wdo_future"),
+        ("CommodityForward", "commodity_forward"),
+        ("VanillaOption", "vanilla_option"), ("Butterfly", "butterfly"),
+        ("Curve", "curve"), ("Spot", "spot"), ("Fx", "fx"),
+    ]:
+        assert _snake(cls_name) == expected
+
+
+def test_norm_cdf_total_at_extremes():
+    from shen.core.math import norm_cdf
+    assert norm_cdf(-200.0) == 0.0
+    assert norm_cdf(200.0) == 1.0
+
+
+def test_match_routes_first_true_and_defaults():
+    from shen.core.math import match, where
+
+    assert match((False, "a"), (True, "b"), default="d") == "b"
+    assert match((False, "a"), (False, "b"), default="d") == "d"
+    assert where(True, "t", "f") == "t"
+    assert where(False, "t", "f") == "f"
+
+    import polars as pl
+
+    df = pl.Series("x", [-2.0, 0.0, 3.0]).to_frame()
+    out = df.select(
+        match((pl.col("x") < 0, "neg"), (pl.col("x") == 0, "zero"), default="pos").alias("cls")
+    )["cls"].to_list()
+    assert out == ["neg", "zero", "pos"]
