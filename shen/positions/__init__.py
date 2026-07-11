@@ -1,19 +1,3 @@
-"""Position layer: holdings, marks, P&L over any value vector."""
-
-from shen.positions.positions import (
-    Position,
-    PriceVector,
-    Valuation,
-    basis,
-    mtm,
-    pnl,
-)
-
-__all__ = [
-    "Position",
-    "PriceVector",
-    "Valuation",
-    "basis",
-    "mtm",
-    "pnl",
-]
+from shen.contracts.position import Position
+from shen.contracts.values import InstrumentValue, Valuation
+from shen.positions.positions import basis, mtm, pnl
