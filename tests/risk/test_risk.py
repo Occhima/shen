@@ -18,7 +18,7 @@ def test_dv01_returns_lazy():
             shen.FxReference: pl.DataFrame(
                 {
                     "reference_id": ["PTAX"],
-                    "fixing_date": [dt.date(2026, 7, 31)],
+                    "observation_date": [dt.date(2026, 7, 31)],
                     "rate": [5.1],
                     "status": ["projected"],
                     "source": ["x"],
@@ -30,7 +30,7 @@ def test_dv01_returns_lazy():
     )
     t = pl.DataFrame(
         {
-            "contract_id": ["N"],
+            "instrument_id": ["N"],
             "product_type": ["ndf"],
             "base_currency": ["USD"],
             "quote_currency": ["BRL"],
@@ -42,5 +42,6 @@ def test_dv01_returns_lazy():
             "settlement_currency": ["BRL"],
         }
     )
-    out = shen.dv01(t, m, universe=shen.PricingUniverse.from_pricers(ndf))
-    assert isinstance(out, pl.LazyFrame)
+    assert isinstance(
+        shen.dv01(t, m, universe=shen.PricingUniverse.from_pricers(ndf)), pl.LazyFrame
+    )

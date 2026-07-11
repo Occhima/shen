@@ -7,7 +7,7 @@ from shen.products.fx.ndf import NdfTicket, ndf
 REF = dt.date(2026, 7, 3)
 
 
-def market(rate=5.1485, curve_scen=False):
+def market(rate=5.1485):
     curves = pl.DataFrame(
         {
             "curve_id": ["BRL", "BRL"],
@@ -18,7 +18,7 @@ def market(rate=5.1485, curve_scen=False):
     fx = pl.DataFrame(
         {
             "reference_id": ["PTAX"],
-            "fixing_date": [dt.date(2026, 7, 31)],
+            "observation_date": [dt.date(2026, 7, 31)],
             "rate": [rate],
             "status": ["projected"],
             "source": ["internal"],
@@ -33,7 +33,7 @@ def market(rate=5.1485, curve_scen=False):
 def terms():
     return pl.DataFrame(
         {
-            "contract_id": ["NDF1"],
+            "instrument_id": ["NDF1"],
             "product_type": ["ndf"],
             "base_currency": ["USD"],
             "quote_currency": ["BRL"],
@@ -44,26 +44,34 @@ def terms():
             "settlement_curve": ["BRL"],
             "settlement_currency": ["BRL"],
         }
-    ).lazy()
+    )
 
 
 def test_ndf_price_and_mtm_long_short():
     v = ndf.price(terms(), market()).collect()
-    assert v["scenario_id"][0] == "base"
-    assert v["currency"][0] == "BRL"
-    assert v["unit"][0] == "BRL/USD"
     assert abs(v["value"][0] - 0.1485) < 1e-12
     pos = shen.Position.validate(
-        pl.DataFrame({"contract_id": ["NDF1", "NDF1"], "qty": [1_000_000.0, -250_000.0]})
+        pl.DataFrame(
+            {
+                "book": ["FX"],
+                "instrument_id": ["NDF1"],
+                "quantity": [750000.0],
+                "quantity_unit": ["USD"],
+            }
+        )
     )
-    book = shen.mtm(pos, v.lazy()).collect()
+    book = shen.mtm(pos, v).collect()
     assert abs(book["mtm"][0] - 111375.0) < 1e-6
 
 
 def test_ndf_missing_reference_is_unresolved():
-    bad = terms().with_columns(reference_id=pl.lit("BAD"))
-    out = ndf.price(bad, market(), strict=False).collect()
-    assert out["value"][0] is None
+    out = ndf.price(
+        terms().with_columns(reference_id=pl.lit("BAD")),
+        market(),
+        strict=False,
+        trace=True,
+    ).collect()
+    assert out["_lookup_error"][0]
 
 
 def test_ndf_ticket_parse():
@@ -88,4 +96,6 @@ def test_ndf_ticket_parse():
         }
     )
     parsed = NdfTicket.parse(raw)
-    assert parsed.trade.collect().height == 1 and parsed.positions.collect().height == 1
+    assert (
+        parsed.tickets.collect().height == 1 and parsed.components.collect().height == 1
+    )

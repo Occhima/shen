@@ -3,9 +3,11 @@ name = "shen"
 version = "0.1.0"
 description = "Contract-oriented, lazy, vectorized pricing lib"
 requires-python = ">=3.12"
-dependencies = ["polars>=1.0", "pandera>=0.24", "pandas>=2"]
+dependencies = ["polars>=1.0", "pandera>=0.24"]
 
 [project.optional-dependencies]
+interop = ["pandas>=2"]
+
 tree = ["networkx>=3"]
 
 dev = [
@@ -50,12 +52,9 @@ ignore = ["PLR0913"]
 # expr.py is the IR interpreter: match-based dispatchers legitimately have many
 # returns/branches, precedence levels are bare ints, and the JAX import is an
 # intentionally guarded optional dependency.
-"shen/core/expr.py" = ["PLR0911", "PLR0912", "PLR2004", "PLC0415"]
 # tests assert against literal expected values.
 "tests/**/*.py" = ["PLR2004"]
 "**/__init__.py" = ["F401", "F403"]
-"shen/core/registry.py" = ["PLC0415"]
-"shen/contracts/market.py" = ["PLR2004"]
 "plugins/*/tests/**/*.py" = ["PLR2004"]
 # the shared option pricer defines many small headless formula functions whose
 # parameters legitimately shadow earlier terms / take several market inputs.

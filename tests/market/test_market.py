@@ -26,5 +26,4 @@ def test_raw_di_canonicalization():
             "anchor_date": [dt.date(2026, 1, 1)],
         }
     )
-    out = shen.canonicalize_di(raw).collect()
-    assert out["log_df"][0] < 0
+    assert shen.canonicalize_di(raw).collect()["log_df"][0] < 0
