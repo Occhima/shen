@@ -1,28 +1,33 @@
 import polars as pl
 
-from shen.contracts.market import Curve, Spot, VolSurface
-from shen.contracts.pricing import ButterflyTerms, VanillaOptionTerms
-from shen.contracts.values import ValueSpec
-from shen.core.math import exp, log, norm_cdf, sqrt, where
-from shen.core.registry import Lookup, LookupPolicy, price_legs, pricer
+from shen.domain.contracts.instruments import VanillaOptionTerms
+from shen.domain.contracts.market import Curve, IndexObservation, VolSurface
+from shen.pricing.fetch import Fetch, FetchPolicy
+from shen.pricing.math import exp, log, norm_cdf, sqrt, where
+from shen.pricing.pricer import ValueSpec, pricer
 
 
 @pricer(
     VanillaOptionTerms,
     lookups=(
-        Lookup(
-            Spot, "index", "valuation_date", "value", "spot", LookupPolicy("previous")
+        Fetch(
+            IndexObservation,
+            "index_id",
+            "valuation_date",
+            "value",
+            "spot",
+            FetchPolicy("previous"),
         ),
-        Lookup(
-            Curve, "disc_curve", "expiry", "log_df", "log_df_exp", LookupPolicy("linear")
+        Fetch(
+            Curve, "disc_curve", "expiry", "log_df", "log_df_exp", FetchPolicy("linear")
         ),
-        Lookup(
+        Fetch(
             VolSurface,
             "surface",
             "expiry",
-            ("atm", "skew", "curv"),
+            ("atm", "skew", "curvature"),
             None,
-            LookupPolicy("linear"),
+            FetchPolicy("linear"),
         ),
     ),
     derive={
@@ -30,10 +35,10 @@ from shen.core.registry import Lookup, LookupPolicy, price_legs, pricer
     },
     output=ValueSpec("present_value", "BRL", "BRL/option"),
 )
-def vanilla_option(cp, strike, tau, spot, log_df_exp, atm, skew, curv):
+def vanilla_option(cp, strike, tau, spot, log_df_exp, atm, skew, curvature):
     f = spot / exp(log_df_exp)
     k = log(strike / f)
-    sigma = atm + skew * k + curv * k * k
+    sigma = atm + skew * k + curvature * k * k
     v = sigma * sqrt(tau)
     d1 = -k / v + 0.5 * v
     d2 = d1 - v
@@ -41,10 +46,3 @@ def vanilla_option(cp, strike, tau, spot, log_df_exp, atm, skew, curv):
     call = df * (f * norm_cdf(d1) - strike * norm_cdf(d2))
     put = df * (strike * norm_cdf(-d2) - f * norm_cdf(-d1))
     return where(cp > 0, call, put)
-
-
-@price_legs(
-    ButterflyTerms, vanilla_option, weights={"low": 1.0, "mid": -2.0, "high": 1.0}
-)
-def butterfly(low, mid, high):
-    return low - 2 * mid + high

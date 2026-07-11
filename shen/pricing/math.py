@@ -25,8 +25,7 @@ def _dispatch(name, x):
     m = getattr(x, name, None)
     if callable(m):
         return m()
-    fn = getattr(_backend.get(), name, None) or getattr(_math, name)
-    return fn(x)
+    return (getattr(_backend.get(), name, None) or getattr(_math, name))(x)
 
 
 def exp(x):
@@ -49,9 +48,7 @@ def where(cond, a, b):
             .otherwise(b if isinstance(b, pl.Expr) else pl.lit(b))
         )
     mod = _backend.get()
-    if hasattr(mod, "where"):
-        return mod.where(cond, a, b)
-    return a if cond else b
+    return mod.where(cond, a, b) if hasattr(mod, "where") else (a if cond else b)
 
 
 def norm_cdf(x):

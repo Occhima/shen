@@ -2,31 +2,47 @@ from dataclasses import dataclass
 
 import polars as pl
 
-from shen.contracts.base import as_lazy
-from shen.contracts.market import Curve, FxReference
-from shen.contracts.position import Position
-from shen.contracts.pricing import NdfTerms
-from shen.contracts.trade import Trade
-from shen.contracts.values import ValueSpec
-from shen.core.math import exp
-from shen.core.registry import Lookup, LookupPolicy, pricer
+from shen.domain.contracts.base import as_lazy
+from shen.domain.contracts.instruments import NdfTerms
+from shen.domain.contracts.market import Curve, FxReference
+from shen.domain.contracts.tickets import Ticket, TicketComponent
+from shen.pricing.fetch import Fetch, FetchPolicy
+from shen.pricing.math import exp
+from shen.pricing.pricer import ValueSpec, pricer
 
 
 @dataclass(frozen=True, slots=True)
 class ParsedTrade:
-    trade: pl.LazyFrame
+    tickets: pl.LazyFrame
     terms: pl.LazyFrame
-    positions: pl.LazyFrame
+    components: pl.LazyFrame
+
+    @property
+    def trade(self):
+        return self.tickets
+
+    @property
+    def positions(self):
+        return self.components
 
 
 class NdfTicket:
     @staticmethod
     def parse(raw) -> ParsedTrade:
         lf = as_lazy(raw)
-        trade = Trade.validate(
+        ticket_id = (
+            "ticket_id" if "ticket_id" in lf.collect_schema().names() else "trade_id"
+        )
+        instrument_id = (
+            "instrument_id"
+            if "instrument_id" in lf.collect_schema().names()
+            else "contract_id"
+        )
+        qty = "quantity" if "quantity" in lf.collect_schema().names() else "qty"
+        tickets = Ticket.validate(
             lf.select(
-                "trade_id",
-                "contract_id",
+                pl.col(ticket_id).alias("ticket_id"),
+                pl.lit("ndf").alias("ticket_type"),
                 "trade_date",
                 "book",
                 "counterparty",
@@ -36,7 +52,7 @@ class NdfTicket:
         )
         terms = NdfTerms.validate(
             lf.select(
-                "contract_id",
+                pl.col(instrument_id).alias("instrument_id"),
                 "base_currency",
                 "quote_currency",
                 "strike",
@@ -47,28 +63,36 @@ class NdfTicket:
                 "settlement_currency",
             ).with_columns(product_type=pl.lit("ndf"))
         )
-        pos = Position.validate(lf.select("contract_id", "qty"))
-        return ParsedTrade(trade, terms, pos)
+        comps = TicketComponent.validate(
+            lf.select(
+                pl.col(ticket_id).alias("ticket_id"),
+                pl.lit("main").alias("component_id"),
+                pl.col(instrument_id).alias("instrument_id"),
+                pl.col(qty).alias("quantity"),
+                pl.col("base_currency").alias("quantity_unit"),
+            )
+        )
+        return ParsedTrade(tickets, terms, comps)
 
 
 @pricer(
     NdfTerms,
     lookups=(
-        Lookup(
+        Fetch(
             FxReference,
             "reference_id",
             "fixing_date",
             "rate",
             "reference_rate",
-            LookupPolicy("exact"),
+            FetchPolicy("exact"),
         ),
-        Lookup(
+        Fetch(
             Curve,
             "settlement_curve",
             "settlement_date",
             "log_df",
             "log_df_settlement",
-            LookupPolicy("linear"),
+            FetchPolicy("linear"),
         ),
     ),
     output=ValueSpec(

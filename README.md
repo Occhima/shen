@@ -1,109 +1,22 @@
 # Shen
 
-Shen is a small, lazy, vectorized pricing library for tabular financial contracts.
-The public namespace is:
+Shen is a contract-oriented, DataFrame-first pricing library built on Polars and Pandera.
 
-```python
-import shen
-```
+## Architecture
 
-The architecture is intentionally explicit:
+The public domain vocabulary is normalized around atomic instruments, tickets, ticket components, market data, and values:
 
-```text
-PricingTerms + Market -> UnitValue
-Trade -> Position
-Position x UnitValue -> MTM
-```
+- `shen.domain.contracts.instruments` contains atomic Pandera `DataFrameModel` terms keyed by `instrument_id`.
+- `shen.domain.contracts.tickets` contains `Ticket`, `TicketComponent`, `Position`, and `validate_ticket_book`.
+- `shen.domain.contracts.market` contains canonical market data frames. Instruments own requested dates; market frames expose market coordinates.
+- `shen.pricing` contains market fetch declarations, pricers, and the lazy pricing engine.
+- `shen.portfolio` derives component, ticket, position, MTM, PnL, and basis frames.
+- `shen.risk` contains only implemented risk measures such as curve DV01.
 
-## Concepts
+Structured tickets are represented relationally: one ticket row and one or more component rows. Pricing dispatch is by atomic instrument `product_type`; signed `TicketComponent.quantity` is the only holding direction.
 
-- **Product**: a family such as NDF, DI Future, WDO Future, Commodity Forward,
-  Vanilla Option, Bullet Swap.
-- **PricingTerms**: economic terms that change payoff. They are Pandera/Polars
-  table contracts keyed by `contract_id` and stable `product_type` values.
-- **Trade**: booking metadata (`trade_id`, `book`, `counterparty`, `trader`).
-- **Position**: signed exposure (`contract_id`, `qty`). Pricers return unit values.
-- **Market**: immutable valuation-date market frames: curves, FX references, fixings,
-  volatility surfaces, scenarios and provenance.
-- **Pricer**: a callable object that combines terms schema, declarative lookups,
-  derived columns, a pure mathematical calculator and typed output metadata.
+## Validation
 
-## NDF example
+`ShenFrame.validate` is the public boundary path. It applies declaration-ordered `@derived` transformations, materializes once, validates with Pandera, and returns a `LazyFrame`.
 
-```python
-import datetime as dt
-import polars as pl
-import shen
-from shen.products.fx.ndf import ndf
-
-valuation_date = dt.date(2026, 7, 3)
-
-terms = pl.DataFrame({
-    "contract_id": ["NDF1"],
-    "product_type": ["ndf"],
-    "base_currency": ["USD"],
-    "quote_currency": ["BRL"],
-    "strike": [5.00],
-    "fixing_date": [dt.date(2026, 7, 31)],
-    "settlement_date": [dt.date(2026, 8, 3)],
-    "reference_id": ["PTAX"],
-    "settlement_curve": ["BRL"],
-    "settlement_currency": ["BRL"],
-}).lazy()
-
-market = shen.Market.load({
-    shen.FxReference: pl.DataFrame({
-        "reference_id": ["PTAX"],
-        "fixing_date": [dt.date(2026, 7, 31)],
-        "rate": [5.1485],
-        "status": ["projected"],
-        "source": ["internal"],
-        "observed_at": [dt.datetime(2026, 7, 3, 12)],
-    }),
-    shen.Curve: pl.DataFrame({
-        "curve_id": ["BRL", "BRL"],
-        "pillar_date": [valuation_date, dt.date(2026, 8, 3)],
-        "log_df": [0.0, 0.0],
-    }),
-}, valuation_date=valuation_date)
-
-unit_value = ndf.price(terms, market)
-position = shen.Position.validate(pl.DataFrame({
-    "contract_id": ["NDF1"],
-    "qty": [1_000_000.0],
-}))
-valuation = shen.mtm(position, unit_value)
-```
-
-For the data above, the unit value is `0.1485 BRL/USD` and the MTM is
-`148_500 BRL` for a `1_000_000 USD` long position.
-
-## Scenarios
-
-Market objects can carry `scenario_id`. The base scenario is always `"base"`.
-Scenario identifiers are preserved in pricing and MTM outputs; they are never
-implemented as Python loops.
-
-## Explicit universe
-
-Book pricing uses an explicit immutable universe:
-
-```python
-values = shen.price(terms, market, universe=shen.STANDARD)
-```
-
-Individual pricers remain ergonomic:
-
-```python
-values = ndf.price(terms, market)
-```
-
-## Development checks
-
-```bash
-ruff check .
-ruff format --check .
-ty check shen
-pytest
-python -m build
-```
+`ShenFrame.resolve` is the trusted internal path. It stays lazy and applies schema-level validation only; value-level checks are not fully executed until a public validation boundary.
