@@ -1,12 +1,10 @@
-"""shen.core — optional layers over the explicit core.
-
-Nothing here changes core semantics: Market stays a frozen value,
-price(trades, mkt) stays explicit. Plugins add ergonomics for
-pipelines: ambient market context and networkx pricing trees.
-Requires the `tree` extra: pip install shen[tree]
-"""
-
-from shen.core.engine import MarketContext, market
-from shen.core.tree import Tree
-
-__all__ = ["MarketContext", "Tree", "market"]
+from shen.core.engine import price, unresolved
+from shen.core.math import math_backend
+from shen.core.registry import (
+    Lookup,
+    LookupPolicy,
+    Pricer,
+    PricingUniverse,
+    price_legs,
+    pricer,
+)

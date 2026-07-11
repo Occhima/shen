@@ -53,6 +53,9 @@ ignore = ["PLR0913"]
 "shen/core/expr.py" = ["PLR0911", "PLR0912", "PLR2004", "PLC0415"]
 # tests assert against literal expected values.
 "tests/**/*.py" = ["PLR2004"]
+"**/__init__.py" = ["F401", "F403"]
+"shen/core/registry.py" = ["PLC0415"]
+"shen/contracts/market.py" = ["PLR2004"]
 "plugins/*/tests/**/*.py" = ["PLR2004"]
 # the shared option pricer defines many small headless formula functions whose
 # parameters legitimately shadow earlier terms / take several market inputs.

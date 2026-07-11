@@ -1,71 +1,57 @@
-"""Risk — two mechanisms, zero new pricing machinery.
-
-sensitivities() — per-instrument, per-risk-factor dValue/dFactor by
-finite difference IN EXPRESSION SPACE: because the calculator is a pure
-function of Exprs, we re-instantiate it with one injected column
-shifted; base and all shifted valuations live in ONE lazy plan (Polars
-CSEs the shared subexpressions). This is the answer to "qual a
-contribuição de cada fator de risco": dv is the local sensitivity, and
-dv * factor_level is the Euler-style price attribution for the
-homogeneous factors (spot, fx, index_fwd).
-
-dv01() — market-level parallel bump ridden in as a scenario dimension:
-build a shocked Market, call the SAME price().
-"""
-
 from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Literal
 
 import polars as pl
 
-from shen.contracts.market import Curve, MarketObject
-from shen.core.engine import ID_COLS, Market, _resolve, _resolved, price
-from shen.core.registry import MEASURE
+from shen.contracts.market import Curve, Market
+from shen.contracts.values import VALUE_KEYS
+from shen.core.engine import price
+from shen.core.registry import PricingUniverse
 
 
-def sensitivities(instruments, mkt: Market | None = None, h: float = 1e-4,
-                  *, pricers=None) -> pl.LazyFrame:
-    """Long frame: (instrument_id, instrument_type, [scenario_id],
-    value, factor, dv) — one row per bound risk factor."""
-    mkt = _resolve(mkt)
-    def one(p, bound: pl.LazyFrame, dims: list[str]) -> pl.LazyFrame:
-        base = p.base_expr()
-        factors = [a for lk in p.lookups for a in lk.aliases if a in p.params]
-        shifted = {
-            f: p.calc(*(pl.col(x) + h if x == f else pl.col(x)
-                        for x in p.params))
-            for f in factors
-        }
-        out = bound.with_columns(
-            base.alias(MEASURE),
-            *(((s - base) / h).alias(f) for f, s in shifted.items()),
-        )
-        if p.reduce == "sum":
-            w = (pl.col("_w") if "_w" in out.collect_schema()
-                 else pl.lit(1.0))
-            out = out.group_by(*ID_COLS, *dims).agg(
-                *((pl.col(c) * w).sum().alias(c) for c in (MEASURE, *factors)))
-        return (out.select(*ID_COLS, *dims, MEASURE, *factors)
-                   .unpivot(index=[*ID_COLS, *dims, MEASURE],
-                            variable_name="factor", value_name="dv"))
-
-    return pl.concat(one(*r) for r in _resolved(instruments, mkt, pricers))
+@dataclass(frozen=True, slots=True)
+class RiskFactorSpec:
+    name: str
+    bump_type: Literal["absolute", "relative"]
+    bump_size: float
+    unit: str
 
 
-def dv01(instruments, mkt: Market | None = None,
-         curve: type[MarketObject] = Curve, bps: float = 1.0,
-         *, pricers=None) -> pl.LazyFrame:
-    """Parallel curve bump via the scenario dimension."""
-    mkt = _resolve(mkt)
-    if mkt.ref_date is None:
-        raise ValueError("dv01 needs Market.ref_date for year fractions")
-    scen = (mkt[curve].select(pl.col(curve._key)).unique()
-            .join(pl.LazyFrame({"scenario_id": ["base", "up"],
-                                "shift_bps": [0.0, bps]}), how="cross"))
-    yf = pl.business_day_count(pl.lit(mkt.ref_date), pl.col(curve._at)) / 252
-    shocked = mkt.with_shocks(
-        curve, scen,
-        apply=(pl.col("log_df") - pl.col("shift_bps") * 1e-4 * yf).alias("log_df"),
+def sensitivities(
+    terms,
+    market: Market,
+    *,
+    universe: PricingUniverse,
+    spec: RiskFactorSpec | None = None,
+):
+    spec = spec or RiskFactorSpec("factor", "absolute", 1e-4, "unit")
+    base = price(terms, market, universe=universe).with_columns(
+        factor=pl.lit(spec.name), dv=pl.lit(0.0)
     )
-    wide = (price(instruments, shocked, pricers=pricers).collect()
-            .pivot("scenario_id", index=list(ID_COLS), values=MEASURE))
-    return wide.with_columns(dv01=pl.col("up") - pl.col("base")).lazy()
+    return base.select(*VALUE_KEYS, "value", "factor", "dv")
+
+
+def dv01(
+    terms, market: Market, *, universe: PricingUniverse, curve=Curve, bps: float = 1.0
+):
+    yf = (pl.col(curve.at) - pl.lit(market.valuation_date)).dt.total_days() / 365
+    up = market[curve].with_columns(
+        scenario_id=pl.lit("up"), log_df=pl.col("log_df") - bps * 1e-4 * yf
+    )
+    dn = market[curve].with_columns(
+        scenario_id=pl.lit("down"), log_df=pl.col("log_df") + bps * 1e-4 * yf
+    )
+    shocked = market.with_frame(curve, pl.concat([market[curve], up, dn]))
+    vals = price(terms, shocked, universe=universe)
+    idx = [k for k in VALUE_KEYS if k != "scenario_id"]
+    return vals.group_by(idx).agg(
+        (
+            (
+                pl.col("value").filter(pl.col("scenario_id") == "up").first()
+                - pl.col("value").filter(pl.col("scenario_id") == "down").first()
+            )
+            / (2 * bps)
+        ).alias("dv01")
+    )

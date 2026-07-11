@@ -1,199 +1,189 @@
-"""Market-object contracts.
-
-Interpolation prep, fixing logic, and factor derivation live HERE — not
-in the calculator, not in the engine. `validate()` is overridden to be
-the single gate: parse -> pandera-validate -> LazyFrame. It accepts
-anything frame-shaped (pandas from a vendor, polars eager/lazy from a
-cache) and emits a canonical LazyFrame. There is no path around it, and
-the schema checks the DERIVED fields — validation as postcondition of
-parsing.
-
-Each contract carries its own join geometry (_key, _at): a Curve knows
-it is keyed by curve_id and time-indexed by pillar_date. Binds only say
-which *instrument* columns map onto that geometry.
-"""
-
 from __future__ import annotations
 
-import re
-from typing import ClassVar
+import datetime as dt
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from typing import Any, ClassVar, Literal
 
-import pandera.pandas  # noqa: F401 — registers builtin checks (gt/unique/...) into the polars backend's CHECK_FUNCTION_REGISTRY; without this, pandera.polars.Field(gt=0) raises KeyError at class definition.
 import pandera.polars as pa
 import polars as pl
 
-
-def as_lazy(frame) -> pl.LazyFrame:
-    """pandas / polars eager / polars lazy -> LazyFrame (frame-agnostic edge)."""
-    match frame:
-        case pl.LazyFrame():
-            return frame
-        case pl.DataFrame():
-            return frame.lazy()
-        case _:
-            return pl.from_pandas(frame).lazy()
+from shen.contracts.base import ShenFrame, as_lazy
+from shen.exceptions import DuplicateQuoteError, MissingMarketObjectError
 
 
-def _snake(name: str) -> str:
-    """Acronym-aware: DICurve -> di_curve, VolSurface -> vol_surface.
-    Boundaries: lower/digit->Upper, and Upper->Upper+lower."""
-    return re.sub(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])",
-                  "_", name).lower()
-
-
-MARKET_TYPES: dict[str, type["MarketObject"]] = {}
-"""Name -> contract, filled by MarketObject.__init_subclass__. This is
-what lets Market.load(curve=df) and MarketContext(ref, curve=df) exist:
-defining `class Vol(MarketObject)` REGISTERS `vol=` as a valid kwarg —
-the open-world version of a dataclass field."""
-
-
-class MarketObject(pa.DataFrameModel):
-    _key: ClassVar[str]  # entity column, e.g. curve_id
-    _at: ClassVar[str]   # time column joined against instrument dates
-    _canonical: ClassVar[type["MarketObject"] | None] = None
-    """Convention -> canonical contract. None = self is canonical (the
-    normal case). A convention (e.g. DICurve) sets this to its target
-    (e.g. Curve) so Market.load routes its rows through _to_canonical
-    and merges into the canonical contract's frame — the convention
-    exists only as an ingestion shape, never as a stored frame."""
-
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
-        name = _snake(cls.__name__)
-        other = MARKET_TYPES.get(name)
-        if other is not None and other is not cls:
-            raise TypeError(
-                f"market contract name {name!r} already registered by {other.__name__}")
-        MARKET_TYPES[name] = cls
-
-    class Config:
-        strict = "filter"
-        coerce = True
+class MarketObject(ShenFrame):
+    key: ClassVar[str]
+    at: ClassVar[str]
+    value_cols: ClassVar[tuple[str, ...]] = ()
 
     @classmethod
-    def _parse(cls, lf: pl.LazyFrame) -> pl.LazyFrame:
-        """Derive fields, dedup, sort. Identity by default."""
-        return lf.unique(subset=[cls._key, cls._at], keep="last").sort(cls._key, cls._at)
+    def coordinate(cls, at: pl.Expr, *, ref_date: pl.Expr | None = None) -> pl.Expr:
+        return at.dt.epoch("d")
 
     @classmethod
-    def _to_canonical(cls, lf: pl.LazyFrame) -> pl.LazyFrame:
-        """Convention form -> canonical form. Identity by default;
-        conventions override to do their specific derivation
-        (rate -> log_df, etc.). Only called when _canonical is set."""
-        return lf
-
-    @classmethod
-    def validate(cls, frame, *args, **kwargs) -> pl.LazyFrame:  # type: ignore[override]
-        """THE gate: anything frame-shaped in, canonical LazyFrame out."""
-        return super().validate(cls._parse(as_lazy(frame)), *args, **kwargs)
+    def economic_keys(cls) -> tuple[str, ...]:
+        return (cls.key, cls.at, "scenario_id")
 
 
 class Curve(MarketObject):
-    """Discount curve. Prep: log-space factors, sorted deduped pillars.
-
-    The compounding/day-count convention is a CONTRACT characteristic:
-    the gate accepts whichever representation the source has and
-    derives the rest —
-        log_df                          (bootstrap output: passthrough)
-        discount_factor                 -> log_df = ln(df)
-        rate + anchor_date              -> bus/252 exponential (Brazil):
-                                           log_df = -(du/252) * ln(1+rate)
-    Holidays for the business-day count are injected per deployment via
-    Curve.holidays(anbima_dates) — weekends-only by default.
-    """
-
-    _key: ClassVar[str] = "curve_id"
-    _at: ClassVar[str] = "pillar_date"
-    _holidays: ClassVar[tuple] = ()
-
+    key: ClassVar[str] = "curve_id"
+    at: ClassVar[str] = "pillar_date"
+    value_cols: ClassVar[tuple[str, ...]] = ("log_df",)
     curve_id: str
     pillar_date: pl.Date
-    discount_factor: float = pa.Field(gt=0)
-    log_df: float  # derived; schema proves the parse happened
+    log_df: float
+    source: str | None = None
+    as_of: pl.Datetime | None = None
+    priority: int | None = None
+    quality: str | None = None
+    scenario_id: str = "base"
 
     @classmethod
-    def holidays(cls, dates) -> None:
-        cls._holidays = tuple(dates)
-
-    @classmethod
-    def _parse(cls, lf: pl.LazyFrame) -> pl.LazyFrame:
+    def validate(cls, frame, *args, **kwargs) -> pl.LazyFrame:  # type: ignore[override]
+        lf = as_lazy(frame)
         names = set(lf.collect_schema().names())
-        has_log = "log_df" in names
-        has_df = "discount_factor" in names
-        if has_log and has_df:
-            lf = lf.with_columns(
-                log_df=pl.when(pl.col("log_df").is_null())
-                         .then(pl.col("discount_factor").log())
-                         .otherwise(pl.col("log_df")),
-                discount_factor=pl.when(pl.col("discount_factor").is_null())
-                                  .then(pl.col("log_df").exp())
-                                  .otherwise(pl.col("discount_factor")))
-        elif not has_log:
-            if has_df:
-                lf = lf.with_columns(log_df=pl.col("discount_factor").log())
-            elif {"rate", "anchor_date"} <= names:
-                du = pl.business_day_count(
-                    pl.col("anchor_date"), pl.col("pillar_date"),
-                    holidays=list(cls._holidays))
-                lf = lf.with_columns(
-                    log_df=-(du / 252) * pl.col("rate").log1p())
-            else:
-                raise ValueError(
-                    "Curve needs log_df, discount_factor, or (rate, anchor_date)")
-            lf = lf.with_columns(discount_factor=pl.col("log_df").exp())
-        elif not has_df:
-            lf = lf.with_columns(discount_factor=pl.col("log_df").exp())
-        return super()._parse(lf)
+        if "log_df" not in names and "discount_factor" in names:
+            lf = lf.with_columns(log_df=pl.col("discount_factor").log())
+        if "scenario_id" not in names:
+            lf = lf.with_columns(scenario_id=pl.lit("base"))
+        return super().validate(lf, *args, **kwargs)
+
+
+class RawDICurve(ShenFrame):
+    curve_id: str
+    pillar_date: pl.Date
+    rate: float
+    anchor_date: pl.Date
+
+
+def canonicalize_di(raw, convention: RateConvention | None = None) -> pl.LazyFrame:
+    lf = RawDICurve.validate(raw)
+    denom = 252.0 if convention is None or convention.day_count == "BUS/252" else 365.0
+    days = (
+        pl.business_day_count(pl.col("anchor_date"), pl.col("pillar_date"))
+        if denom == 252.0
+        else (pl.col("pillar_date") - pl.col("anchor_date")).dt.total_days()
+    )
+    return lf.with_columns(log_df=-(days / denom) * pl.col("rate").log1p()).select(
+        "curve_id", "pillar_date", "log_df"
+    )
 
 
 class Spot(MarketObject):
-    """Fixings / index observations. Fixing logic: publication lag shift,
-    last-good-observation dedup. Calculators only ever see `value`."""
-
-    _key: ClassVar[str] = "index"
-    _at: ClassVar[str] = "fixing_date"
-
+    key: ClassVar[str] = "index"
+    at: ClassVar[str] = "fixing_date"
+    value_cols: ClassVar[tuple[str, ...]] = ("value",)
     index: str
     fixing_date: pl.Date
     value: float
-    publication_lag_days: int = pa.Field(ge=0, default=0)
-
-    @classmethod
-    def _parse(cls, lf: pl.LazyFrame) -> pl.LazyFrame:
-        return super()._parse(
-            lf.with_columns(
-                fixing_date=pl.col("fixing_date")
-                + pl.duration(days=pl.col("publication_lag_days"))
-            )
-        )
+    scenario_id: str = "base"
 
 
 class Fx(MarketObject):
-    _key: ClassVar[str] = "pair"
-    _at: ClassVar[str] = "date"
-
+    key: ClassVar[str] = "pair"
+    at: ClassVar[str] = "date"
+    value_cols: ClassVar[tuple[str, ...]] = ("rate",)
     pair: str
     date: pl.Date
     rate: float = pa.Field(gt=0)
+    scenario_id: str = "base"
+
+
+class FxReference(MarketObject):
+    key: ClassVar[str] = "reference_id"
+    at: ClassVar[str] = "fixing_date"
+    value_cols: ClassVar[tuple[str, ...]] = ("rate",)
+    reference_id: str
+    fixing_date: pl.Date
+    rate: float = pa.Field(gt=0)
+    status: str
+    source: str
+    observed_at: pl.Datetime
+    scenario_id: str = "base"
 
 
 class VolSurface(MarketObject):
-    """Volatility matrix as a PARAMETRIZED smile per (surface, expiry):
-    sigma(k) = atm + skew*k + curv*k^2 with k = ln(K/F).
-
-    Design choice: storing smile parameters (instead of a raw strike
-    grid) keeps interpolation inside the ONE existing Lookup primitive
-    — three lerp lookups over expiry — and makes the strike dimension
-    pure calculator arithmetic. A raw K-grid would need a 2D lookup;
-    that is the extension point if you ever quote by strike directly.
-    """
-
-    _key: ClassVar[str] = "surface_id"
-    _at: ClassVar[str] = "expiry"
-
+    key: ClassVar[str] = "surface_id"
+    at: ClassVar[str] = "expiry"
+    value_cols: ClassVar[tuple[str, ...]] = ("atm", "skew", "curv")
     surface_id: str
     expiry: pl.Date
     atm: float = pa.Field(gt=0)
     skew: float
     curv: float
+    scenario_id: str = "base"
+
+
+@dataclass(frozen=True, slots=True)
+class Calendar:
+    name: str
+    holidays: tuple[dt.date, ...] = ()
+
+
+DayCount = Literal["BUS/252", "ACT/365"]
+Compounding = Literal["continuous", "annual"]
+
+
+@dataclass(frozen=True, slots=True)
+class RateConvention:
+    day_count: DayCount = "BUS/252"
+    compounding: Compounding = "annual"
+    calendar: Calendar = Calendar("weekends")
+
+
+@dataclass(frozen=True, slots=True)
+class Scenario:
+    scenario_id: str
+    scenario_group: str = "default"
+    description: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Market:
+    frames: Mapping[type[MarketObject], pl.LazyFrame] = field(default_factory=dict)
+    valuation_date: dt.date | None = None
+
+    @classmethod
+    def load(
+        cls,
+        data: Mapping[type[MarketObject], Any] | None = None,
+        *,
+        valuation_date: dt.date | None = None,
+        ref_date: dt.date | None = None,
+        collisions: Literal["error", "last"] = "error",
+        **named,
+    ) -> Market:
+        entries = dict(data or {})
+        name_map = {
+            c.__name__.lower(): c for c in (Curve, Spot, Fx, FxReference, VolSurface)
+        }
+        for name, raw in named.items():
+            entries[name_map[name]] = raw
+        frames = {}
+        for c, raw in entries.items():
+            lf = c.validate(raw)
+            keys = [k for k in c.economic_keys() if k in lf.collect_schema().names()]
+            if collisions == "error":
+                dup = lf.group_by(keys).len().filter(pl.col("len") > 1).limit(1).collect()
+                if dup.height:
+                    raise DuplicateQuoteError(f"duplicate {c.__name__} quotes for {keys}")
+            else:
+                lf = lf.unique(subset=keys, keep="last")
+            frames[c] = lf
+        return cls(frames, valuation_date or ref_date)
+
+    def __getitem__(self, c: type[MarketObject]) -> pl.LazyFrame:
+        try:
+            return self.frames[c]
+        except KeyError as e:
+            raise MissingMarketObjectError(c.__name__) from e
+
+    def with_data(
+        self, data: Mapping[type[MarketObject], Any] | None = None, **named
+    ) -> Market:
+        add = Market.load(data, valuation_date=self.valuation_date, **named)
+        return Market({**self.frames, **add.frames}, self.valuation_date)
+
+    def with_frame(self, c: type[MarketObject], lf: pl.LazyFrame) -> Market:
+        return Market({**self.frames, c: lf}, self.valuation_date)
