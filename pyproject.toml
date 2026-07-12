@@ -3,7 +3,7 @@ name = "shen"
 version = "0.1.0"
 description = "Contract-oriented, lazy, vectorized pricing lib"
 requires-python = ">=3.12"
-dependencies = ["polars>=1.0", "pandera>=0.24"]
+dependencies = ["polars>=1.0", "pandera>=0.24", "pandas>=2"]
 
 [project.optional-dependencies]
 interop = ["pandas>=2"]

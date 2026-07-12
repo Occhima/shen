@@ -881,7 +881,6 @@ name = "shen"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "pandas" },
     { name = "pandera" },
     { name = "polars" },
 ]
@@ -896,6 +895,9 @@ dev = [
     { name = "ruff" },
     { name = "ty" },
 ]
+interop = [
+    { name = "pandas" },
+]
 tree = [
     { name = "networkx" },
 ]
@@ -905,7 +907,7 @@ requires-dist = [
     { name = "marimo", marker = "extra == 'dev'", specifier = ">=0.9" },
     { name = "networkx", marker = "extra == 'tree'", specifier = ">=3" },
     { name = "numpy", marker = "extra == 'dev'", specifier = ">=1.26" },
-    { name = "pandas", specifier = ">=2" },
+    { name = "pandas", marker = "extra == 'interop'", specifier = ">=2" },
     { name = "pandera", specifier = ">=0.24" },
     { name = "poethepoet", marker = "extra == 'dev'", specifier = ">=0.36" },
     { name = "polars", specifier = ">=1.0" },
@@ -914,7 +916,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.12" },
     { name = "ty", marker = "extra == 'dev'", specifier = ">=0.0.1a16" },
 ]
-provides-extras = ["tree", "dev"]
+provides-extras = ["interop", "tree", "dev"]
 
 [[package]]
 name = "six"
